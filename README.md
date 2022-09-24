@@ -5,6 +5,13 @@ Official PyTorch implementation of "SCAM! Transferring humans between images wit
 Arxiv link | Website link | Paper Link
 <span color='red'>#TODO add links </span>
 
+
+<p align="center">
+<img src="medias/teaser.png" height="300px"/>
+</p>
+
+
+
 ## Bibtex
 
 If you happen to find this code or method useful in your research please cite this paper with
