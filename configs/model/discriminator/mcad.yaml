@@ -1,0 +1,16 @@
+_target_: models.discriminators.mcad.MultiScaleMCADiscriminator
+num_discriminator: 2
+image_num_channels: ${dataset.num_channels}
+segmap_num_channels: ${dataset.num_labels}
+positional_embedding_dim: 40
+num_labels: ${dataset.num_labels}
+num_latent_per_labels: 8
+latent_dim: 64
+num_blocks: 6
+attention_latent_dim: 64
+num_cross_heads: 1
+num_self_heads: 1
+apply_spectral_norm: False
+concat_segmaps: True
+output_type: attention_pool
+keep_intermediate_results: True

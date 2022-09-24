@@ -1,0 +1,10 @@
+_target_: albumentations.Compose
+transforms:
+  - _target_: albumentations.Resize
+    height: ${dataset.height}
+    width: ${dataset.width}
+
+  - _target_: albumentations.Normalize
+    mean: 0.5
+    std: 0.5
+  - _target_: albumentations.pytorch.ToTensorV2

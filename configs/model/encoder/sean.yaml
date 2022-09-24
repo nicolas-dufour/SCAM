@@ -1,0 +1,4 @@
+_target_: models.encoder.RegionalAveragePoolingStyleEncoder
+num_input_channels: ${dataset.num_channels}
+latent_dim: 512
+num_features_fst_conv: 32

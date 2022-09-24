@@ -1,0 +1,15 @@
+disc_optim:
+  _target_: models.utils_blocks.SAM.SAM
+  rho: 0.5
+  adaptive: True
+  lr: 0.0004
+  betas: [0.9, 0.999]
+  weight_decay: 0.01
+gen_optim:
+  _target_: models.utils_blocks.SAM.SAM
+  rho: 0.5
+  adaptive: True
+  lr: 0.0001
+  betas: [0.9, 0.999]
+  weight_decay: 0.01
+SAM: True

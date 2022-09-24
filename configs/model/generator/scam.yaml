@@ -1,0 +1,25 @@
+_target_ : models.generator.SCAMGenerator
+num_filters_last_layer: 64
+num_up_layers: 6
+height: ${dataset.height}
+width: ${dataset.width}
+num_labels: ${dataset.num_labels}
+num_labels_split: 8
+num_labels_bg: 8
+style_dim: ${model.encoder.latent_dim}
+kernel_size: 3
+attention_latent_dim: 256
+num_heads: 1
+attention_type: duplex
+num_up_layers_with_mask_adain: 0
+num_output_channels: ${dataset.num_channels}
+latent_pos_emb: none
+apply_spectral_norm: False
+split_latents: False
+norm_type: InstanceNorm
+architecture: skip
+add_noise: True
+modulate: True
+use_equalized_lr: False
+lr_mul: 1.0
+use_vae: False

@@ -1,0 +1,10 @@
+_target_ : models.generator.SPADEGenerator
+num_filters_last_layer: 64
+num_up_layers: 7
+height: ${dataset.height}
+width: ${dataset.width}
+num_labels: ${dataset.num_labels}
+kernel_size: 3
+num_output_channels: ${dataset.num_channels}
+apply_spectral_norm: True
+use_vae : True

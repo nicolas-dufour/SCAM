@@ -1,0 +1,24 @@
+_target_: albumentations.Compose
+transforms:
+  - _target_: albumentations.ColorJitter
+    p: 0.4
+  - _target_: albumentations.HorizontalFlip
+    p: 0.5
+  - _target_: albumentations.OneOf
+    p: 1
+    transforms:
+      - _target_: albumentations.RandomResizedCrop
+        height: ${dataset.height}
+        width: ${dataset.width}
+        scale: [0.5, 1]
+        ratio: [1,1]
+        p: 0.7
+      - _target_: albumentations.Resize
+        height: ${dataset.height}
+        width: ${dataset.width}
+        p: 0.3
+
+  - _target_: albumentations.Normalize
+    mean: 0.5
+    std: 0.5
+  - _target_: albumentations.pytorch.ToTensorV2

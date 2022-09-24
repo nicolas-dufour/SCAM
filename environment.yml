@@ -1,0 +1,19 @@
+name: scam
+channels:
+  - defaults
+dependencies:
+  - numpy=1.21.2
+  - pillow=9.0.1
+  - python=3.9.12
+  - pip=21.2.4
+  - pip:
+    - albumentations==1.1.0
+    - einops==0.4.1
+    - hydra-core==1.1.1
+    - kornia==0.6.4
+    - pytorch-lightning==1.6.0
+    - torch-fidelity==0.3.0
+    - torchmetrics==0.7.3
+    - torchtyping==0.1.4
+    - tqdm==4.64.0
+    - wandb==0.12.4

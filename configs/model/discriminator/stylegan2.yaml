@@ -1,0 +1,12 @@
+_target_: models.discriminators.stylegan2.MultiStyleGan2Discriminator
+num_discriminator: 1
+image_num_channels: ${dataset.num_channels}
+segmap_num_channels: ${dataset.num_labels}
+num_features_fst_conv: 64
+num_layers: 7
+fmap_max: 512
+apply_spectral_norm: False
+apply_grad_norm: False
+keep_intermediate_results: True
+use_equalized_lr: False
+lr_mul: 1.0

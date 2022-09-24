@@ -1,0 +1,14 @@
+defaults:
+  - train_aug: crop
+  - val_aug: crop
+
+path: ${data_dir}/ADE20K
+name: ADE20K
+height: 256
+width: 256
+num_labels_orig: 151
+num_labels:  ${dataset.num_labels_orig}
+num_channels: 3
+num_workers: 4
+image_extension: jpg
+label_merge_strat: none

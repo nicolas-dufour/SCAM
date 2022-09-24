@@ -1,0 +1,15 @@
+_target_: torch.nn.Sequential
+_args_: 
+  - _target_: kornia.augmentation.augmentation.Denormalize
+    mean: 0.5
+    std: 0.5
+  - _target_: kornia.augmentation.augmentation.ColorJitter
+    p: 0.8
+    brightness : 0.2
+    contrast: 0.3
+    hue: 0.2
+  - _target_: kornia.augmentation.augmentation.RandomErasing
+    p: 0.5
+  - _target_: kornia.augmentation.augmentation.Normalize
+    mean: 0.5
+    std: 0.5

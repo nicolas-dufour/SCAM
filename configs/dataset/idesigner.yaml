@@ -1,0 +1,14 @@
+defaults:
+  - train_aug: nonepad
+  - val_aug: nonepad
+
+path: ${data_dir}/idesigner
+name: idesigner
+height: 512
+width: 340
+num_labels_orig: 20
+num_labels:  3
+num_channels: 3
+num_workers: 10
+image_extension: png
+label_merge_strat: body_face_background

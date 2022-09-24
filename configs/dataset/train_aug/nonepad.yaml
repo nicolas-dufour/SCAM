@@ -1,0 +1,18 @@
+_target_: albumentations.Compose
+transforms:
+  - _target_: albumentations.LongestMaxSize 
+    p: 1
+    max_size:  ${dataset.height}
+  - _target_: albumentations.PadIfNeeded 
+    p: 1
+    border_mode: 0
+    min_height:  ${dataset.height}
+    min_width:  ${dataset.width}
+    value: [0,0,0]
+    mask_value: 0
+  - _target_: albumentations.HorizontalFlip
+    p: 0.5    
+  - _target_: albumentations.Normalize
+    mean: 0.5
+    std: 0.5
+  - _target_: albumentations.pytorch.ToTensorV2

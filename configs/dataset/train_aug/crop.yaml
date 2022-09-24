@@ -1,0 +1,28 @@
+_target_: albumentations.Compose
+transforms:
+  - _target_: albumentations.Resize
+    height: ${dataset.height}
+    width: ${dataset.width}
+  - _target_: albumentations.ColorJitter
+    p: 0.4
+  - _target_: albumentations.HorizontalFlip
+    p: 0.5
+  - _target_: albumentations.OneOf
+    transforms:
+      - _target_: albumentations.RandomSizedCrop
+        p: 0.7
+        w2h_ratio: 0.664
+        min_max_height: [400, 512]
+        height:  ${dataset.height}
+        width:  ${dataset.width}
+      - _target_: albumentations.RandomSizedCrop
+        p: 0.3
+        w2h_ratio: 0.664
+        min_max_height: [128, 400]
+        height:  ${dataset.height}
+        width:  ${dataset.width}
+    p: 0.6
+  - _target_: albumentations.Normalize
+    mean: 0.5
+    std: 0.5
+  - _target_: albumentations.pytorch.ToTensorV2

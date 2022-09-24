@@ -1,0 +1,41 @@
+defaults:
+  - disc_augments: null
+  - generator: sean_clade
+  - discriminator: patchgan
+  - encoder: sean
+  - optim: adam
+
+change_init: True
+gradient_clip_val: 0
+name: SEAN_CLADE
+dataset_path: ${dataset.path}
+  lambda_gan: 1
+  lambda_gan_end: ${model.losses.lambda_gan}
+  lambda_gan_decay_steps: 1
+
+  lambda_fm: 10.0
+  lambda_fm_end: ${model.losses.lambda_fm}
+  lambda_fm_decay_steps: 1
+
+  lambda_label_mix: 0
+  lambda_label_mix_end: ${model.losses.lambda_label_mix}
+  lambda_label_mix_decay_steps: 1
+
+  lambda_l1: 0
+  lambda_l1_end: ${model.losses.lambda_l1}
+  lambda_l1_decay_steps: 1
+
+  lambda_perceptual: 10.0
+  lambda_perceptual_end: ${model.losses.lambda_perceptual}
+  lambda_perceptual_decay_steps: 1
+
+  lambda_r1: 0
+  lambda_r1_end: ${model.losses.lambda_r1}
+  lambda_r1_decay_steps: 1
+
+  lambda_kld: 0
+  lambda_kld_end: ${model.losses.lambda_kld}
+  lambda_kld_decay_steps: 1
+  lazy_r1_step: 16
+  gan_loss_type: hinge
+  gan_loss_on_swaps: False

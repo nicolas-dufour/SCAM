@@ -1,0 +1,5 @@
+_target_: models.discriminators.oasis.OASISDiscriminator
+image_num_channels: ${dataset.num_channels}
+segmap_num_channels: ${dataset.num_labels}
+apply_spectral_norm: True
+apply_grad_norm: False

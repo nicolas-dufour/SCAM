@@ -1,0 +1,8 @@
+devices: 1
+progress_bar_refresh_rate: 2
+sync_batchnorm: False
+accelerator: mps
+precision: 32
+strategy: null
+batch_size: 4
+num_nodes: 1

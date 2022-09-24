@@ -1,0 +1,14 @@
+defaults:
+  - train_aug: none
+  - val_aug: none
+
+path: ${data_dir}/CelebA-HQ
+name: CelebA-HQ
+height: 256
+width: 256
+num_labels: ${dataset.num_labels_orig}
+num_labels_orig: 19
+num_channels: 3
+num_workers: 10
+image_extension: jpg
+label_merge_strat: none

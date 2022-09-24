@@ -1,0 +1,45 @@
+defaults:
+  - model: scam
+  - compnode: cpu
+  - dataset: CelebAHQ
+
+trainer:
+  _target_: pytorch_lightning.Trainer
+  max_steps: 100000
+  devices: ${compnode.devices}
+  accelerator: ${compnode.accelerator}
+  sync_batchnorm: ${compnode.sync_batchnorm}
+  strategy: ${compnode.strategy}
+  log_every_n_steps: 1
+  num_nodes: ${compnode.num_nodes}
+  precision: ${compnode.precision}
+dataset:
+  batch_size: ${compnode.batch_size}
+  
+logger:
+  _target_: pytorch_lightning.loggers.WandbLogger
+  save_dir: ${root_dir}/wandb
+  name: ${experiment_name}
+  project: Pose_Transfer
+  log_model: False
+  offline: True
+
+checkpoints:
+  _target_: pytorch_lightning.callbacks.ModelCheckpoint
+  dirpath: ${root_dir}/checkpoints/${experiment_name}
+  monitor: val/reco_fid
+  save_last: True
+  every_n_epochs: 1
+
+progress_bar:
+  _target_: pytorch_lightning.callbacks.TQDMProgressBar
+  refresh_rate: ${compnode.progress_bar_refresh_rate}
+
+hydra:
+  run:
+    dir: outputs/${hydra.job.name}/${now:%Y-%m-%d_%H-%M-%S}/${experiment_name}
+
+data_dir: ${root_dir}/datasets
+root_dir:  ${hydra:runtime.cwd}
+experiment_name_comp: base
+experiment_name: ${dataset.name}_${model.name}_${experiment_name_comp}

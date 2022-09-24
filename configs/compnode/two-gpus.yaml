@@ -1,0 +1,8 @@
+devices: 2
+progress_bar_refresh_rate: 2
+sync_batchnorm: False
+accelerator: gpu
+precision: 16
+strategy: ddp
+batch_size: 4
+num_nodes: 1

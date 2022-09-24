@@ -1,0 +1,2 @@
+_target_: models.encoder.GroupDNetStyleEncoder
+num_labels: ${dataset.num_labels}
