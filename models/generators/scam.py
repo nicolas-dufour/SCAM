@@ -4,19 +4,306 @@ import torch.nn.functional as F
 import torch.nn.utils.spectral_norm as spectral_norm
 
 from torchtyping import TensorType
-from typing import Tuple
+from typing import Tuple, Sequence
 from einops import rearrange
 from functools import partial
 from models.utils_blocks.equallr import EqualLinear, EqualConv2d
-from einops.layers.torch import Rearrange
 import math
+from collections import OrderedDict
 
 from models.utils_blocks.attention import (
     MaskedAttention,
     MaskedTransformer,
     SinusoidalPositionalEmbedding,
+    LearnedPositionalEmbedding
 )
 
+from einops.einops import rearrange
+from models.utils_blocks.base import BaseNetwork
+
+class SCAMGenerator(BaseNetwork):
+    """
+    This is the SCAM Generator that generates images provided a segmentation mask and style codes using regional duplex attention
+
+    Parameters:
+    -----------
+        num_filters_last_layer: int,
+            Number of convolution filters at the last layer of the generator.
+        num_up_layers: int,
+            Number of SCAM upscaling layers
+        num_up_layers_with_mask_adain: int,
+            Number of SCAM blocks where we include explicitly mask info in the convolution
+        height: int,
+            Height of the generated image
+        width: int,
+            Width of the generated image
+        num_labels: int,
+            Number of segmentation labels
+        style_dim: int,
+            Dimension of the style vectors
+        kernel_size: int,
+            Size of the kernel for all convolutions in the kernel (padding = kernel_size//2)
+        num_heads: int,
+            Number of heads to use in the attention blocks
+        attention_type: str, default="duplex"
+            Whether to use simplex or duplex attention
+        num_output_channels: int.
+            Number of output channels (3 for RGB)
+        apply_spectral_norm: bool, default True
+            Whether to use or not the spectral norm in the block
+        split_latents: bool, default True
+            Whether or not to split the latents into sublatents
+        num_labels_split: bool, default 1
+            Number of splits per latent
+    """
+
+    def __init__(
+        self,
+        num_filters_last_layer: int,
+        num_up_layers: int,
+        num_up_layers_with_mask_adain: int,
+        height: int,
+        width: int,
+        num_labels: int,
+        style_dim: int,
+        kernel_size: int,
+        attention_latent_dim: int,
+        num_heads: int,
+        attention_type: str,
+        num_output_channels: int,
+        latent_pos_emb: str = "learned",
+        architecture: str = "skip",
+        apply_spectral_norm: bool = True,
+        split_latents: bool = True,
+        num_labels_split: int = 1,
+        num_labels_bg: int = None,
+        norm_type: bool = "InstanceNorm",
+        add_noise: bool = True,
+        modulate: bool = True,
+        use_equalized_lr: bool = False,
+        use_vae: bool = False,
+        lr_mul: float = 1.0,
+    ):
+        super().__init__()
+
+        nf = num_filters_last_layer
+        self.num_labels = num_labels
+        self.num_labels_split = num_labels_split
+        self.split_latents = split_latents
+        self.attention_type = attention_type
+
+        if num_labels_bg is None:
+            num_labels_bg = num_labels_split
+
+        self.num_labels_bg = num_labels_bg
+
+        self.latent_pos_emb = latent_pos_emb
+        if num_up_layers >= 4:
+            self.num_up_layers = num_up_layers
+        else:
+            raise ValueError("Number of layers must be bigger than 4")
+        assert num_up_layers_with_mask_adain <= num_up_layers
+        aspect_ratio = width / height
+
+        if aspect_ratio < 1:
+            self.small_w = width // (2 ** (num_up_layers))
+
+            self.small_h = round(self.small_w / aspect_ratio)
+
+            if self.small_w < 2:
+                raise ValueError(
+                    "You picked to many layers for the given image dimension."
+                )
+        else:
+            self.small_h = height // (2**num_up_layers)
+
+            self.small_w = round(self.small_h / aspect_ratio)
+
+            if self.small_h < 2:
+                raise "You picked to many layers for the given image dimension."
+        self.num_style_tokens = (num_labels - 1) * num_labels_split + num_labels_bg
+        if split_latents:
+            if not style_dim % num_labels_split == 0:
+                raise ValueError(
+                    "Style vector dimension must be divisible by the number of labels splits"
+                )
+
+            self.latents_dim = style_dim // num_labels_split
+        else:
+            self.latents_dim = style_dim
+
+        if self.latent_pos_emb == "learned":
+            self.style_code_pos_encoding = LearnedPositionalEmbedding(
+                self.num_style_tokens, self.latents_dim
+            )
+        elif self.latent_pos_emb == "fourrier":
+            self.style_code_pos_encoding = SinusoidalPositionalEmbedding(
+                self.latents_dim
+            )
+        else:
+            self.style_code_pos_encoding = nn.Identity()
+
+        ConvLayer = (
+            partial(EqualConv2d, lr_mul=lr_mul) if use_equalized_lr else nn.Conv2d
+        )
+
+        scam_params = {
+            "num_labels": self.num_style_tokens,
+            "style_dim": self.latents_dim,
+            "kernel_size": kernel_size,
+            "attention_latent_dim": attention_latent_dim,
+            "num_heads": num_heads,
+            "attention_type": attention_type,
+            "apply_spectral_norm": apply_spectral_norm,
+            "norm_type": norm_type,
+            "architecture": architecture,
+            "image_dim": num_output_channels,
+            "add_noise": add_noise,
+            "modulate": modulate,
+            "use_equalized_lr": use_equalized_lr,
+            "lr_mul": lr_mul,
+        }
+
+        padding = kernel_size // 2
+
+        # First convolution
+        self.first_conv = ConvLayer(
+            in_channels=num_labels,
+            out_channels=16 * nf,
+            kernel_size=kernel_size,
+            padding=padding,
+        )
+
+        dict_of_scam_blocks = OrderedDict()
+
+        # Down layers with constant number of filters
+        for i in range(num_up_layers - 4):
+            dict_of_scam_blocks.update(
+                {
+                    f"SCAM_block_{i}": SCAMResUpscale(
+                        upscale_size=2,
+                        input_dim=16 * nf,
+                        output_dim=16 * nf,
+                        use_mask_adain=i < num_up_layers_with_mask_adain,
+                        **scam_params,
+                    ),
+                }
+            )
+
+        # We progressively diminish the feature map
+        for i in range(3):
+            dict_of_scam_blocks.update(
+                {
+                    f"SCAM_block_{num_up_layers - 4+i}": SCAMResUpscale(
+                        upscale_size=2,
+                        input_dim=2 ** (4 - i) * nf,
+                        output_dim=2 ** (3 - i) * nf,
+                        use_mask_adain=num_up_layers - 4 + i
+                        < num_up_layers_with_mask_adain,
+                        **scam_params,
+                    ),
+                }
+            )
+        # Finally we upscale to the given size
+        dict_of_scam_blocks.update(
+            {
+                f"SCAM_block_{num_up_layers - 1}": SCAMResUpscale(
+                    upscale_size=(height, width),
+                    input_dim=2 * nf,
+                    output_dim=nf,
+                    last_block=True,
+                    use_mask_adain=num_up_layers - 1 == num_up_layers_with_mask_adain,
+                    **scam_params,
+                ),
+            }
+        )
+
+        self.backbone = nn.ModuleDict(dict_of_scam_blocks)
+
+        # And the last convolution
+        self.last_act = nn.Tanh()
+
+        self.copy = None
+        self.use_vae = use_vae
+
+    def forward(
+        self,
+        segmentation_map: TensorType["batch_size", "num_labels", "height", "width"],
+        style_codes: TensorType["batch_size", "num_labels", "style_dim"] = None,
+        content_code: TensorType["batch_size", "content_dim"] = None,
+    ) -> TensorType["batch_size", "num_output_channels", "height", "width"]:
+
+        batch_size = segmentation_map.shape[0]
+
+        x = F.interpolate(segmentation_map, size=(self.small_h, self.small_w))
+        x = self.first_conv(x)
+
+        # if self.copy is None:
+
+        #     self.copy = torch.clone(self.first_conv.weight)
+        # else:
+        #     print(torch.sum(torch.abs(self.copy - self.first_conv.weight)))
+
+        segmentation_map = torch.cat(
+            [
+                torch.repeat_interleave(
+                    segmentation_map[:, 0].unsqueeze(1),
+                    self.num_labels_bg,
+                    dim=1,
+                ),
+                torch.repeat_interleave(
+                    segmentation_map[:, 1:],
+                    self.num_labels_split,
+                    dim=1,
+                ),
+            ],
+            dim=1,
+        )
+        if self.use_vae:
+            assert isinstance(style_codes, Sequence)
+            assert len(style_codes) == 2
+            mu, logvar = style_codes
+            if self.training:
+                std = torch.exp(0.5 * logvar)
+                eps = torch.randn_like(std)
+                style_codes = eps.mul(std) + mu
+            else:
+                style_codes = mu
+        if self.split_latents:
+            style_codes = style_codes.view(
+                batch_size, self.num_labels * self.num_labels_split, -1
+            )
+        if self.latent_pos_emb == "fourier":
+            style_codes = self.style_code_pos_encoding(
+                style_codes.unsqueeze(1)
+            ).squeeze(1)
+        else:
+            style_codes = self.style_code_pos_encoding(style_codes)
+
+        # Then proceed to apply the different sean_block
+        img = None
+        for i in range(len(self.backbone)):
+            if self.attention_type == "duplex":
+                x, style_codes, img = self.backbone[f"SCAM_block_{i}"](
+                    x,
+                    segmentation_map,
+                    style_codes=style_codes,
+                    content_code=content_code,
+                    previous_rgb=img,
+                )
+            else:
+                x, _, img = self.backbone[f"SCAM_block_{i}"](
+                    x,
+                    segmentation_map,
+                    style_codes=style_codes,
+                    content_code=content_code,
+                    previous_rgb=img,
+                )
+        # Finally a last convolution
+        img = self.last_act(img)
+        return img
+    def get_last_layer(self):
+        return self.backbone[f"SCAM_block_{len(self.backbone)-1}"].torgb.conv_rgb.weight
 
 class ToRGB(nn.Module):
     def __init__(

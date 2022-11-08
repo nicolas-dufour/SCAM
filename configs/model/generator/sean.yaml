@@ -1,4 +1,4 @@
-_target_ : models.generator.SEANGenerator
+_target_ : models.generators.sean.SEANGenerator
 num_filters_last_layer: 64
 num_up_layers: 7
 height: ${dataset.height}
@@ -8,3 +8,4 @@ style_dim: ${model.encoder.latent_dim}
 kernel_size: 3
 num_output_channels: ${dataset.num_channels}
 apply_spectral_norm: True
+use_vae: False

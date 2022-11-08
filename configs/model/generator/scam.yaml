@@ -1,4 +1,4 @@
-_target_ : models.generator.SCAMGenerator
+_target_ : models.generators.scam.SCAMGenerator
 num_filters_last_layer: 64
 num_up_layers: 6
 height: ${dataset.height}

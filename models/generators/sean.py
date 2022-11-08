@@ -4,13 +4,208 @@ import torch.nn.functional as F
 import torch.nn.utils.spectral_norm as spectral_norm
 
 from torchtyping import TensorType
-from typing import Tuple
+from typing import Tuple, Sequence
 from collections import OrderedDict
 
+from models.utils_blocks.base import BaseNetwork
 
-class SEANCLADEResUpscale(nn.Module):
+class SEANGenerator(BaseNetwork):
+    """ "
+    This is the SEAN Generator that generates images provided a segmentation mask and style codes.
+
+    Parameters:
+    -----------
+        num_filters_last_layer: int,
+            Number of convolution filters at the last layer of the generator.
+        num_up_layers: int,
+            Number of SEAN upscaling layers
+        height: int,
+            Height of the generated image
+        width: int,
+            Width of the generated image
+        num_labels: int,
+            Number of segmentation labels
+        style_dim: int,
+            Dimension of the style vectors
+        kernel_size: int,
+            Size of the kernel for all convolutions in the kernel (padding = kernel_size//2)
+        num_output_channels: int.
+            Number of output channels (3 for RGB)
+        apply_spectral_norm: bool, default True
+            Whether to use or not the spectral norm in the block
     """
-    This combines the upscaling and the SEANCLADEResBlock.
+
+    def __init__(
+        self,
+        num_filters_last_layer: int,
+        num_up_layers: int,
+        height: int,
+        width: int,
+        num_labels: int,
+        style_dim: int,
+        kernel_size: int,
+        num_output_channels: int,
+        apply_spectral_norm: bool = True,
+        use_vae: bool = False,
+    ):
+        super().__init__()
+
+        nf = num_filters_last_layer
+        self.use_vae = use_vae
+        if num_up_layers >= 4:
+            self.num_up_layers = num_up_layers
+        else:
+            raise ValueError("Number of layers must be bigger than 4")
+        aspect_ratio = width / height
+
+        if aspect_ratio < 1:
+            self.small_w = width // (2 ** (num_up_layers - 2))
+
+            self.small_h = round(self.small_w / aspect_ratio)
+
+            if self.small_w < 2:
+                raise ValueError(
+                    "You picked to many layers for the given image dimension."
+                )
+        else:
+            self.small_h = height // (2 ** (num_up_layers - 2))
+
+            self.small_w = round(self.small_h / aspect_ratio)
+
+            if self.small_h < 2:
+                raise "You picked to many layers for the given image dimension."
+
+        sean_params = {
+            "num_labels": num_labels,
+            "style_dim": style_dim,
+            "kernel_size": kernel_size,
+            "apply_spectral_norm": apply_spectral_norm,
+        }
+
+        padding = kernel_size // 2
+
+        # First convolution
+        self.first_conv = nn.Conv2d(
+            in_channels=num_labels,
+            out_channels=16 * nf,
+            kernel_size=kernel_size,
+            padding=padding,
+        )
+
+        dict_of_sean_blocks = OrderedDict()
+
+        dict_of_sean_blocks.update(
+            {
+                f"SEAN_block_0": SEANResUpscale(
+                    upscale_size=2,
+                    input_dim=16 * nf,
+                    output_dim=16 * nf,
+                    use_styles=True,
+                    **sean_params,
+                ),
+            }
+        )
+        dict_of_sean_blocks.update(
+            {
+                f"SEAN_block_1": SEANResUpscale(
+                    upscale_size=0,
+                    input_dim=16 * nf,
+                    output_dim=16 * nf,
+                    use_styles=True,
+                    **sean_params,
+                ),
+            }
+        )
+        # Down layers with constant number of filters
+        for i in range(2, num_up_layers - 4):
+            dict_of_sean_blocks.update(
+                {
+                    f"SEAN_block_{i}": SEANResUpscale(
+                        upscale_size=2,
+                        input_dim=16 * nf,
+                        output_dim=16 * nf,
+                        use_styles=True,
+                        **sean_params,
+                    ),
+                }
+            )
+        # We progressively diminish the feature map
+        for i in range(3):
+            dict_of_sean_blocks.update(
+                {
+                    f"SEAN_block_{num_up_layers - 4+i}": SEANResUpscale(
+                        upscale_size=2,
+                        input_dim=2 ** (4 - i) * nf,
+                        output_dim=2 ** (3 - i) * nf,
+                        use_styles=True,
+                        **sean_params,
+                    ),
+                }
+            )
+        # Finally we upscale to the given size
+        dict_of_sean_blocks.update(
+            {
+                f"SEAN_block_{num_up_layers - 1}": SEANResUpscale(
+                    upscale_size=(height, width),
+                    input_dim=2 * nf,
+                    output_dim=nf,
+                    use_styles=False,
+                    **sean_params,
+                ),
+            }
+        )
+
+        self.backbone = nn.ModuleDict(dict_of_sean_blocks)
+
+        # And the last convolution
+        self.last_conv = nn.Sequential(
+            nn.LeakyReLU(2e-1),
+            nn.Conv2d(
+                in_channels=nf,
+                out_channels=num_output_channels,
+                kernel_size=kernel_size,
+                padding=padding,
+            ),
+            nn.Tanh(),
+        )
+
+    def forward(
+        self,
+        segmentation_map: TensorType["batch_size", "num_labels", "height", "width"],
+        style_codes: TensorType["batch_size", "num_labels", "style_dim"] = None,
+        content_code: TensorType["batch_size", "content_dim"] = None,
+    ) -> TensorType["batch_size", "num_output_channels", "height", "height"]:
+
+        # We first downsample the segmentation map
+        if self.use_vae:
+            assert isinstance(style_codes, Sequence)
+            assert len(style_codes) == 2
+            mu, logvar = style_codes
+            if self.training:
+                std = torch.exp(0.5 * logvar)
+                eps = torch.randn_like(std)
+                style_codes = eps.mul(std) + mu
+            else:
+                style_codes = mu
+        x = F.interpolate(segmentation_map, size=(self.small_h, self.small_w))
+
+        # First convolution
+        x = self.first_conv(x)
+
+        # Then proceed to apply the different sean_block
+        for i in range(len(self.backbone)):
+            x = self.backbone[f"SEAN_block_{i}"](x, segmentation_map, style_codes)
+
+        # Finally a last convolution
+        x = self.last_conv(x)
+        return x
+
+    def get_last_layer(self):
+        return self.last_conv[-2].weight
+
+class SEANResUpscale(nn.Module):
+    """
+    This combines the upscaling and the SEANResBlock.
 
     Args:
     -----
@@ -54,7 +249,7 @@ class SEANCLADEResUpscale(nn.Module):
         else:
             raise "Upscaling size not supported"
 
-        self.sean_clade_block = SEANCLADEResBlock(
+        self.sean_block = SEANResBlock(
             input_dim=input_dim,
             output_dim=output_dim,
             num_labels=num_labels,
@@ -75,14 +270,14 @@ class SEANCLADEResUpscale(nn.Module):
         segmentation_map: TensorType["batch_size", "num_labels", "height", "width"],
         style_codes: TensorType["batch_size", "num_labels", "style_dim"] = None,
     ) -> TensorType["batch_size", "output_dim", "output_heigth", "output_width",]:
-        x = self.sean_clade_block(x, segmentation_map, style_codes=style_codes)
+        x = self.sean_block(x, segmentation_map, style_codes=style_codes)
         x = self.up(x)
         return x
 
 
-class SEANCLADEResBlock(nn.Module):
+class SEANResBlock(nn.Module):
     """
-    This is the base block for the SEANCLADE system. We have to modulation-convolution
+    This is the base block for the SEAN system. We have to modulation-convolution
     and a modulation-convolution skip connection.
 
     Args:
@@ -150,10 +345,10 @@ class SEANCLADEResBlock(nn.Module):
             "style_dim": style_dim,
             "use_styles": use_styles,
         }
-        self.mod_0 = SEANCLADEModulation(feature_map_dim=input_dim, **mod_params)
-        self.mod_1 = SEANCLADEModulation(feature_map_dim=middle_dim, **mod_params)
+        self.mod_0 = SEANModulation(feature_map_dim=input_dim, **mod_params)
+        self.mod_1 = SEANModulation(feature_map_dim=middle_dim, **mod_params)
         if self.resnet_connection:
-            self.mod_res = SEANCLADEModulation(feature_map_dim=input_dim, **mod_params)
+            self.mod_res = SEANModulation(feature_map_dim=input_dim, **mod_params)
 
     def forward(
         self,
@@ -175,9 +370,9 @@ class SEANCLADEResBlock(nn.Module):
         return x_res + dx
 
 
-class SEANCLADEModulation(nn.Module):
+class SEANModulation(nn.Module):
     """
-    This module implements the method proposed in the SEANCLADE paper to modulate the input according
+    This module implements the method proposed in the SEAN paper to modulate the input according
     to the different styles and the segmentation mask.
 
     Parameters:
@@ -209,7 +404,7 @@ class SEANCLADEModulation(nn.Module):
         self.num_labels = num_labels
         self.style_dim = style_dim
 
-        self.segmap_encoder = ClassAffine(num_labels, feature_map_dim)
+        self.segmap_encoder = SegMapEncoder(num_labels, feature_map_dim, kernel_size)
 
         self.blending_gamma = nn.Parameter(torch.zeros(1), requires_grad=True)
         self.blending_beta = nn.Parameter(torch.zeros(1), requires_grad=True)
@@ -299,7 +494,7 @@ class SEANCLADEModulation(nn.Module):
         return out
 
 
-class ClassAffine(nn.Module):
+class SegMapEncoder(nn.Module):
     """
     This block encode the segmentation map and output 2 parameters gamma and beta
     that contributes to the modulation of the generator last layer.
@@ -314,14 +509,35 @@ class ClassAffine(nn.Module):
             Kernel size of the convolutions that are used in this layer
     """
 
-    def __init__(self, num_labels: int, out_channels: int):
+    def __init__(self, num_labels: int, out_channels: int, kernel_size: int):
         super().__init__()
-        self.out_channels = out_channels
-        self.num_labels = num_labels
-        self.weight = nn.Parameter(torch.Tensor(self.num_labels, self.out_channels))
-        self.bias = nn.Parameter(torch.Tensor(self.num_labels, self.out_channels))
-        nn.init.uniform_(self.weight)
-        nn.init.zeros_(self.bias)
+
+        padding = kernel_size // 2
+
+        hidden_dim = 128
+
+        self.shared_mlp = nn.Sequential(
+            nn.Conv2d(
+                in_channels=num_labels,
+                out_channels=hidden_dim,
+                kernel_size=kernel_size,
+                padding=padding,
+            ),
+            nn.ReLU(),
+        )
+
+        self.gamma_mlp = nn.Conv2d(
+            in_channels=hidden_dim,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            padding=padding,
+        )
+        self.mu_mlp = nn.Conv2d(
+            in_channels=hidden_dim,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            padding=padding,
+        )
 
     def forward(
         self,
@@ -332,11 +548,9 @@ class ClassAffine(nn.Module):
         TensorType["batch_size", "out_channels", "fmap_height", "fmap_width"],
         TensorType["batch_size", "out_channels", "fmap_height", "fmap_width"],
     ]:
-        arg_mask = torch.argmax(segmentation_map, 1).long()  # [n, h, w]
-        class_weight = F.embedding(arg_mask, self.weight).permute(
-            0, 3, 1, 2
-        )  # [n, c, h, w]
-        class_bias = F.embedding(arg_mask, self.bias).permute(
-            0, 3, 1, 2
-        )  # [n, c, h, w]
-        return class_weight, class_bias
+        actv = self.shared_mlp(segmentation_map)
+
+        gamma = self.gamma_mlp(actv)
+        beta = self.mu_mlp(actv)
+
+        return gamma, beta

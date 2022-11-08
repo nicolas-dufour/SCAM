@@ -9,6 +9,7 @@ change_init: True
 gradient_clip_val: 0
 name: SEAN_CLADE
 dataset_path: ${dataset.path}
+losses:
   lambda_gan: 1
   lambda_gan_end: ${model.losses.lambda_gan}
   lambda_gan_decay_steps: 1
@@ -39,3 +40,4 @@ dataset_path: ${dataset.path}
   lazy_r1_step: 16
   gan_loss_type: hinge
   gan_loss_on_swaps: False
+  use_adaptive_lambda : False

@@ -39,7 +39,7 @@ def run(cfg):
     image_log_callback = GANImageLog()
 
     stop_if_nan_callback = StopIfNaN(
-        ["train/gen_gan_loss_step", "train/disc_gan_loss_step"]
+        ["train/gen_loss_step", "train/disc_loss_step"]
     )
 
     progress_bar = hydra.utils.instantiate(cfg.progress_bar)
@@ -95,6 +95,8 @@ def run(cfg):
             logger=logger,
             callbacks=callbacks,
         )
+    # trainer.fit_loop.epoch_loop.batch_loop.connect(optimizer_loop=YieldLoop())
+
     trainer.fit(model, datamodule)
 
     trainer.test(model, dataloaders=datamodule, ckpt_path="best")

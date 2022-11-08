@@ -1,4 +1,4 @@
-_target_: models.encoder.MaskedAttentionStyleEncoder
+_target_: models.encoders.sat.SemanticAttentionTransformerEncoder
 num_input_channels: 3
 positional_embedding_dim: 40
 num_labels: ${dataset.num_labels}

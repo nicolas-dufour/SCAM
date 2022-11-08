@@ -1,3 +1,4 @@
-_target_: models.encoder.InstanceAdaptiveEncoder
+_target_: models.encoders.inade.InstanceAdaptiveEncoder
 num_labels: ${dataset.num_labels}
 noise_dim: ${model.generator.noise_dim}
+use_vae: True

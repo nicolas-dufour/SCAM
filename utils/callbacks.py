@@ -48,7 +48,7 @@ class LogAttention(Callback):
             experiment = logger.experiment
             log_encoder = (
                 pl_module.cfg.encoder._target_
-                == "models.encoder.MaskedAttentionStyleEncoder"
+                == "models.encoder.SemanticAttentionTransformerEncoder"
             )
 
             attnn_viz = AttentionVis(log_encoder=log_encoder)

@@ -34,9 +34,11 @@ losses:
   lambda_r1_end: ${model.losses.lambda_r1}
   lambda_r1_decay_steps: 1
 
-  lambda_kld: 0.05
+  lambda_kld: 0
   lambda_kld_end: ${model.losses.lambda_kld}
   lambda_kld_decay_steps: 1
+
   lazy_r1_step: 16
   gan_loss_type: hinge
   gan_loss_on_swaps: False
+  use_adaptive_lambda: False

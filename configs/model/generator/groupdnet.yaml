@@ -1,4 +1,4 @@
-_target_ : models.generator.GroupDNetGenerator
+_target_ : models.generators.groupdnet.GroupDNetGenerator
 num_filters_last_layer: 64
 num_up_layers: 7
 height: ${dataset.height}

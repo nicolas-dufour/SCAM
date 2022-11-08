@@ -136,31 +136,27 @@ class Geppetto(pl.LightningModule):
         opt_g.step()
         # yield gen_loss
 
-        if self.cfg.losses.lambda_gan > 0:
-
-            disc_loss, disc_metrics_dict = self.discriminator_step(
-                real_images, generated_images, segmentation_maps
+        disc_loss, disc_metrics_dict = self.discriminator_step(
+            real_images, generated_images, segmentation_maps
+        )
+        for metric_elem in disc_metrics_dict:
+            self.log(
+                f"train/{metric_elem['name']}",
+                metric_elem["value"],
+                logger=True,
+                on_step=True,
+                on_epoch=True,
+                sync_dist=True,
             )
-            for metric_elem in disc_metrics_dict:
-                self.log(
-                    f"train/{metric_elem['name']}",
-                    metric_elem["value"],
-                    logger=True,
-                    on_step=True,
-                    on_epoch=True,
-                    sync_dist=True,
-                )
 
-            opt_d.zero_grad()
-            self.manual_backward(disc_loss)
-            if self.cfg.gradient_clip_val > 0:
-                clip_grad_norm_(
-                    self.discriminator.parameters(),
-                    max_norm=self.cfg.gradient_clip_val,
-                )
-            opt_d.step()
-            # yield disc_loss
-
+        opt_d.zero_grad()
+        self.manual_backward(disc_loss)
+        if self.cfg.gradient_clip_val > 0:
+            clip_grad_norm_(
+                self.discriminator.parameters(),
+                max_norm=self.cfg.gradient_clip_val,
+            )
+        opt_d.step()
         ##### Logging Metrics #####
 
     def validation_step(self, batch, batch_idx):
@@ -207,20 +203,18 @@ class Geppetto(pl.LightningModule):
             on_epoch=True,
             sync_dist=True,
         )
-        if self.cfg.losses.lambda_gan > 0:
-
-            _, disc_metrics_dict = self.discriminator_step(
-                real_images, generated_images, segmentation_maps
+        _, disc_metrics_dict = self.discriminator_step(
+            real_images, generated_images, segmentation_maps
+        )
+        for metric_elem in disc_metrics_dict:
+            self.log(
+                f"val/{metric_elem['name']}",
+                metric_elem["value"],
+                logger=True,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
             )
-            for metric_elem in disc_metrics_dict:
-                self.log(
-                    f"val/{metric_elem['name']}",
-                    metric_elem["value"],
-                    logger=True,
-                    on_step=False,
-                    on_epoch=True,
-                    sync_dist=True,
-                )
 
     def test_step(self, batch, batch_idx):
         """

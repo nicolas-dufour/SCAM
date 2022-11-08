@@ -18,60 +18,97 @@ class LossWrapper(nn.Module):
         self.cfg_losses = cfg_losses
         self.losses = nn.ModuleDict()
         self.losses_conf = []
-        if self.cfg_losses.lambda_gan > 0 and mode == "generator":
+        if (
+            self.cfg_losses.lambda_gan > 0 or self.cfg_losses.lambda_gan_end > 0
+        ) and mode == "generator":
             self.losses_conf.append(
                 {
                     "name": "gen_gan_loss",
-                    "loss_weight": DecayLambdaLoss(self.cfg_losses.lambda_gan, self.cfg_losses.lambda_gan_end, self.cfg_losses.lambda_gan_decay_steps),
+                    "loss_weight": SwitchLambdaLoss(
+                        self.cfg_losses.lambda_gan,
+                        self.cfg_losses.lambda_gan_end,
+                        self.cfg_losses.lambda_gan_decay_steps,
+                    ),
                     "loss_type": "disc_features_and_segmaps",
                     "sub_group": "gen_gan",
                 }
             )
             self.losses.update(
-                {"gen_gan_loss": GANLoss(self.cfg_losses.gan_loss_type, mode="generator")}
+                {
+                    "gen_gan_loss": GANLoss(
+                        self.cfg_losses.gan_loss_type, mode="generator"
+                    )
+                }
             )
-        if self.cfg_losses.lambda_perceptual > 0 and mode == "generator":
+        if (
+            self.cfg_losses.lambda_perceptual > 0
+            or self.cfg_losses.lambda_perceptual_end > 0
+        ) and mode == "generator":
             self.losses_conf.append(
                 {
                     "name": "perceptual_loss",
-                    "loss_weight": DecayLambdaLoss(self.cfg_losses.lambda_perceptual, self.cfg_losses.lambda_perceptual_end, self.cfg_losses.lambda_perceptual_decay_steps),
+                    "loss_weight": DecayLambdaLoss(
+                        self.cfg_losses.lambda_perceptual,
+                        self.cfg_losses.lambda_perceptual_end,
+                        self.cfg_losses.lambda_perceptual_decay_steps,
+                    ),
                     "loss_type": "images",
                     "sub_group": "reconstruction",
                 }
             )
             self.losses.update({"perceptual_loss": PerceptualLoss()})
-        if self.cfg_losses.lambda_fm > 0 and mode == "generator":
+        if (
+            self.cfg_losses.lambda_fm > 0 or self.cfg_losses.lambda_fm_end > 0
+        ) and mode == "generator":
             self.losses_conf.append(
                 {
                     "name": "fm_loss",
-                    "loss_weight": DecayLambdaLoss(self.cfg_losses.lambda_fm, self.cfg_losses.lambda_fm_end, self.cfg_losses.lambda_fm_decay_steps),
+                    "loss_weight": DecayLambdaLoss(
+                        self.cfg_losses.lambda_fm,
+                        self.cfg_losses.lambda_fm_end,
+                        self.cfg_losses.lambda_fm_decay_steps,
+                    ),
                     "loss_type": "disc_features",
                     "sub_group": "reconstruction",
                 }
             )
             self.losses.update({"fm_loss": FeatureMatchingLoss()})
-        if self.cfg_losses.lambda_l1 > 0 and mode == "generator":
+        if (
+            self.cfg_losses.lambda_l1 > 0 or self.cfg_losses.lambda_l1_end > 0
+        ) and mode == "generator":
             self.losses_conf.append(
                 {
                     "name": "l1_loss",
-                    "loss_weight": DecayLambdaLoss(self.cfg_losses.lambda_l1, self.cfg_losses.lambda_l1_end, self.cfg_losses.lambda_l1_decay_steps),
+                    "loss_weight": DecayLambdaLoss(
+                        self.cfg_losses.lambda_l1,
+                        self.cfg_losses.lambda_l1_end,
+                        self.cfg_losses.lambda_l1_decay_steps,
+                    ),
                     "loss_type": "images",
                     "sub_group": "reconstruction",
                 }
             )
             self.losses.update({"l1_loss": nn.L1Loss()})
-        if self.cfg_losses.lambda_kld > 0 and mode == "generator":
+        if (
+            self.cfg_losses.lambda_kld > 0 or self.cfg_losses.lambda_kld_end > 0
+        ) and mode == "generator":
             self.losses_conf.append(
                 {
                     "name": "kld_loss",
-                    "loss_weight": DecayLambdaLoss(self.cfg_losses.lambda_kld, self.cfg_losses.lambda_kld_end, self.cfg_losses.lambda_kld_decay_steps),
+                    "loss_weight": DecayLambdaLoss(
+                        self.cfg_losses.lambda_kld,
+                        self.cfg_losses.lambda_kld_end,
+                        self.cfg_losses.lambda_kld_decay_steps,
+                    ),
                     "loss_type": "latents",
                     "sub_group": "enc_regularization",
                 }
             )
             self.losses.update({"kld_loss": KLDLoss()})
 
-        if self.cfg_losses.lambda_gan > 0 and mode == "discriminator":
+        if (
+            self.cfg_losses.lambda_gan > 0 or self.cfg_losses.lambda_gan_end > 0
+        ) and mode == "discriminator":
             self.losses_conf.append(
                 {
                     "name": [
@@ -79,7 +116,11 @@ class LossWrapper(nn.Module):
                         "false_disc_gan_loss",
                         "disc_gan_loss",
                     ],
-                    "loss_weight": DecayLambdaLoss(self.cfg_losses.lambda_gan, self.cfg_losses.lambda_gan_end, self.cfg_losses.lambda_gan_decay_steps),
+                    "loss_weight": SwitchLambdaLoss(
+                        self.cfg_losses.lambda_gan,
+                        self.cfg_losses.lambda_gan_end,
+                        self.cfg_losses.lambda_gan_decay_steps,
+                    ),
                     "loss_type": "disc_features_and_segmaps",
                     "sub_group": "disc_gan",
                 }
@@ -92,21 +133,34 @@ class LossWrapper(nn.Module):
                 }
             )
 
-        if self.cfg_losses.lambda_r1 > 0 and mode == "discriminator":
+        if (
+            self.cfg_losses.lambda_r1 > 0 or self.cfg_losses.lambda_r1_end > 0
+        ) and mode == "discriminator":
             self.losses_conf.append(
                 {
                     "name": "r1_reg",
-                    "loss_weight": DecayLambdaLoss(self.cfg_losses.lambda_r1, self.cfg_losses.lambda_r1_end, self.cfg_losses.lambda_r1_decay_steps),
+                    "loss_weight": DecayLambdaLoss(
+                        self.cfg_losses.lambda_r1,
+                        self.cfg_losses.lambda_r1_end,
+                        self.cfg_losses.lambda_r1_decay_steps,
+                    ),
                     "loss_type": "real_inputs",
                     "sub_group": "disc_regularization",
                 }
             )
             self.losses.update({"r1_reg": R1Reg(self.cfg_losses.lazy_r1_step)})
-        if self.cfg_losses.lambda_label_mix > 0 and mode == "discriminator":
+        if (
+            self.cfg_losses.lambda_label_mix > 0
+            or self.cfg_losses.lambda_label_mix_end > 0
+        ) and mode == "discriminator":
             self.losses_conf.append(
                 {
                     "name": "label_mix_reg",
-                    "loss_weight": DecayLambdaLoss(self.cfg_losses.lambda_label_mix, self.cfg_losses.lambda_label_mix_end, self.cfg_losses.lambda_label_mix_decay_steps),
+                    "loss_weight": DecayLambdaLoss(
+                        self.cfg_losses.lambda_label_mix,
+                        self.cfg_losses.lambda_label_mix_end,
+                        self.cfg_losses.lambda_label_mix_decay_steps,
+                    ),
                     "loss_type": "inputs_and_segmap",
                     "sub_group": "disc_regularization",
                 }
@@ -123,13 +177,19 @@ class LossWrapper(nn.Module):
         latents=None,
         last_layer=None,
     ):
-        loss = 0  # torch.FloatTensor(1).fill_(0).to(fake_img.device)
+        loss = (
+            0  # torch.FloatTensor(1).fill_(0).to(fake_img.device).requires_grad_(True)
+        )
         losses_log = []
         losses_subgroups = {}
+        lambda_subgroups = {}
 
         for loss_item in self.losses_conf:
             name = loss_item["name"]
-            loss_weight = loss_item["loss_weight"].step()
+            if self.training:
+                loss_weight = loss_item["loss_weight"].step()
+            else:
+                loss_weight = loss_item["loss_weight"].get()
             loss_type = loss_item["loss_type"]
             sub_group = loss_item["sub_group"]
             if type(name) == list:
@@ -157,21 +217,42 @@ class LossWrapper(nn.Module):
                     losses_log.append(
                         {"name": name[i], "value": loss_value[i].detach()}
                     )
-                losses_subgroups[sub_group] = losses_subgroups.get(sub_group, 0) + loss_weight * loss_tuple
+                losses_subgroups[sub_group] = (
+                    losses_subgroups.get(sub_group, 0) + loss_weight * loss_tuple
+                )
+                lambda_subgroups[sub_group] = (
+                    lambda_subgroups.get(sub_group, 0) + loss_weight
+                )
                 losses_log.append({"name": name[-1], "value": loss_tuple.detach()})
                 losses_log.append({"name": f"lambda_{name[-1]}", "value": loss_weight})
             else:
                 if loss_value is not None:
-                    losses_subgroups[sub_group] = losses_subgroups.get(sub_group, 0) + loss_weight * loss_value
+                    losses_subgroups[sub_group] = (
+                        losses_subgroups.get(sub_group, 0) + loss_weight * loss_value
+                    )
+                    lambda_subgroups[sub_group] = (
+                        lambda_subgroups.get(sub_group, 0) + loss_weight
+                    )
                     losses_log.append({"name": name, "value": loss_value.detach()})
+                    losses_log.append({"name": f"lambda_{name}", "value": loss_weight})
         for key, value in losses_subgroups.items():
             losses_log.append({"name": key, "value": value.detach()})
             if self.cfg_losses.use_adaptive_lambda and key == "gen_gan":
-                try:
-                    lambda_adaptive = self.compute_adaptive_lambda(losses_subgroups["reconstruction"], value, last_layer)
-                    losses_log.append({"name": "lambda_adaptive", "value": lambda_adaptive})
-                except RuntimeError:
-                    assert not self.training
+                if lambda_subgroups["gen_gan"]>0 and lambda_subgroups["reconstruction"]>0:
+                    try:
+                        lambda_adaptive = self.compute_adaptive_lambda(
+                            losses_subgroups["reconstruction"]
+                            / lambda_subgroups["reconstruction"],
+                            value / lambda_subgroups["gen_gan"],
+                            last_layer,
+                        )
+                        losses_log.append(
+                            {"name": "lambda_adaptive", "value": lambda_adaptive}
+                        )
+                    except RuntimeError:
+                        assert not self.training
+                        lambda_adaptive = 1
+                else:
                     lambda_adaptive = 1
                 value = lambda_adaptive * value
             loss += value
@@ -182,6 +263,7 @@ class LossWrapper(nn.Module):
             }
         )
         return loss, losses_log
+
     def compute_adaptive_lambda(self, nll_loss, g_loss, last_layer=None):
         "Taken from Taming Transformers"
         nll_grads = torch.autograd.grad(nll_loss, last_layer, retain_graph=True)[0]
@@ -190,7 +272,8 @@ class LossWrapper(nn.Module):
         d_weight = torch.clamp(d_weight, 0.0, 1e4).detach()
         return d_weight
 
-class DecayLambdaLoss():
+
+class DecayLambdaLoss:
     def __init__(self, lambda_start, lambda_end=None, n_iterations=None):
         super(DecayLambdaLoss, self).__init__()
         self.lambda_start = lambda_start
@@ -207,6 +290,39 @@ class DecayLambdaLoss():
         return self.lambda_start * (self.lambda_end / self.lambda_start) ** (
             min(self.current_iteration, self.n_iterations) / self.n_iterations
         )
+
+    def get(self):
+        return self.lambda_start * (self.lambda_end / self.lambda_start) ** (
+            min(self.current_iteration, self.n_iterations) / self.n_iterations
+        )
+
+
+class SwitchLambdaLoss:
+    def __init__(self, lambda_start, lambda_end=None, n_iterations=None):
+        super(SwitchLambdaLoss, self).__init__()
+        self.lambda_start = lambda_start
+        if lambda_end is None or n_iterations is None:
+            self.lambda_end = lambda_start
+            self.n_iterations = 1
+        else:
+            self.lambda_end = lambda_end
+            self.n_iterations = n_iterations
+        self.current_iteration = 0
+
+    def step(self):
+        self.current_iteration += 1
+        if self.current_iteration < self.n_iterations:
+            return float(self.lambda_start)
+        else:
+            return float(self.lambda_end)
+
+    def get(self):
+        if self.current_iteration < self.n_iterations:
+            return float(self.lambda_start)
+        else:
+            return float(self.lambda_end)
+
+
 class GANLoss(nn.Module):
     """
     GAN Hinge Loss
@@ -434,7 +550,7 @@ class KLDLoss(nn.Module):
         super().__init__()
 
     def kld_loss(self, mu, logvar):
-        kl = -0.5 *(1 + logvar - mu.pow(2) - logvar.exp())
+        kl = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
         # if kl.dim() > 2:
         #     kl = kl.mean(1)
         return kl.sum()

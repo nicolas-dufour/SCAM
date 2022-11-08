@@ -1,1 +1,2 @@
-_target_: models.encoder.SPADEStyleEncoder
+_target_: models.encoders.spade.SPADEStyleEncoder
+use_vae: True

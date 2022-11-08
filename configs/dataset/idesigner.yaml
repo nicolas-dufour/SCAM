@@ -1,11 +1,11 @@
 defaults:
-  - train_aug: nonepad
-  - val_aug: nonepad
+  - train_aug: none 
+  - val_aug: none
 
 path: ${data_dir}/idesigner
 name: idesigner
-height: 512
-width: 340
+height: 256
+width: 170
 num_labels_orig: 20
 num_labels:  3
 num_channels: 3

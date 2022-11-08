@@ -7,8 +7,199 @@ from torchtyping import TensorType
 from typing import Tuple
 from collections import OrderedDict
 
+from models.utils_blocks.base import BaseNetwork
 
-class SPADEResUpscale(nn.Module):
+class GroupDNetGenerator(BaseNetwork):
+    """ "
+    This is the SEAN Generator that generates images provided a segmentation mask and style codes.
+
+    Parameters:
+    -----------
+        num_filters_last_layer: int,
+            Number of convolution filters at the last layer of the generator.
+        num_up_layers: int,
+            Number of SEAN upscaling layers
+        height: int,
+            Height of the generated image
+        width: int,
+            Width of the generated image
+        num_labels: int,
+            Number of segmentation labels
+        style_dim: int,
+            Dimension of the style vectors
+        kernel_size: int,
+            Size of the kernel for all convolutions in the kernel (padding = kernel_size//2)
+        num_output_channels: int.
+            Number of output channels (3 for RGB)
+        apply_spectral_norm: bool, default True
+            Whether to use or not the spectral norm in the block
+    """
+
+    def __init__(
+        self,
+        num_filters_last_layer: int,
+        num_up_layers: int,
+        height: int,
+        width: int,
+        num_labels: int,
+        kernel_size: int,
+        num_output_channels: int,
+        apply_spectral_norm: bool = True,
+        use_vae: bool = True,
+    ):
+        super().__init__()
+
+        self.use_vae = use_vae
+        nf = (num_filters_last_layer // num_labels) * num_labels
+        if num_up_layers >= 4:
+            self.num_up_layers = num_up_layers
+        else:
+            raise ValueError("Number of layers must be bigger than 4")
+        aspect_ratio = width / height
+
+        if aspect_ratio < 1:
+            self.small_w = width // (2 ** (num_up_layers - 1))
+
+            self.small_h = round(self.small_w / aspect_ratio)
+
+            if self.small_w < 2:
+                raise ValueError(
+                    "You picked to many layers for the given image dimension."
+                )
+        else:
+            self.small_h = height // (2 ** (num_up_layers - 1))
+
+            self.small_w = round(self.small_h / aspect_ratio)
+
+            if self.small_h < 2:
+                raise "You picked to many layers for the given image dimension."
+
+        groupdnet_params = {
+            "num_labels": num_labels,
+            "kernel_size": kernel_size,
+            "apply_spectral_norm": apply_spectral_norm,
+        }
+
+        padding = kernel_size // 2
+
+        # First convolution
+        self.fc = nn.Conv2d(
+            8 * num_labels,
+            16 * num_labels,
+            kernel_size=3,
+            padding=1,
+            groups=num_labels,
+        )
+
+        dict_of_groupdnet_blocks = OrderedDict()
+
+        # Down layers with constant number of filters
+        dict_of_groupdnet_blocks.update(
+            {
+                f"GroupDNet_block_0": GroupDNetResUpscale(
+                    upscale_size=2,
+                    input_dim=16 * num_labels,
+                    output_dim=16 * nf,
+                    groups=16,
+                    **groupdnet_params,
+                ),
+            }
+        )
+        dict_of_groupdnet_blocks.update(
+            {
+                f"GroupDNet_block_1": GroupDNetResUpscale(
+                    upscale_size=0,
+                    input_dim=16 * nf,
+                    output_dim=16 * nf,
+                    groups=16,
+                    **groupdnet_params,
+                ),
+            }
+        )
+        for i in range(2, num_up_layers - 4):
+            dict_of_groupdnet_blocks.update(
+                {
+                    f"GroupDNet_block_{i}": GroupDNetResUpscale(
+                        upscale_size=2,
+                        input_dim=16 * nf,
+                        output_dim=16 * nf,
+                        groups=16,
+                        **groupdnet_params,
+                    ),
+                }
+            )
+        # We progressively diminish the feature map
+        for i in range(3):
+            dict_of_groupdnet_blocks.update(
+                {
+                    f"GroupDNet_block_{num_up_layers - 4+i}": GroupDNetResUpscale(
+                        upscale_size=2,
+                        input_dim=2 ** (4 - i) * nf,
+                        output_dim=2 ** (3 - i) * nf,
+                        groups=2 ** (3 - i),
+                        **groupdnet_params,
+                    ),
+                }
+            )
+        # Finally we upscale to the given size
+        dict_of_groupdnet_blocks.update(
+            {
+                f"GroupDNet_block_{num_up_layers - 1}": GroupDNetResUpscale(
+                    upscale_size=(height, width),
+                    input_dim=2 * nf,
+                    output_dim=nf,
+                    groups=1,
+                    **groupdnet_params,
+                ),
+            }
+        )
+
+        self.backbone = nn.ModuleDict(dict_of_groupdnet_blocks)
+
+        # And the last convolution
+        self.last_conv = nn.Sequential(
+            nn.LeakyReLU(2e-1),
+            nn.Conv2d(
+                in_channels=nf,
+                out_channels=num_output_channels,
+                kernel_size=kernel_size,
+                padding=padding,
+            ),
+            nn.Tanh(),
+        )
+
+    def forward(
+        self,
+        segmentation_map: TensorType["batch_size", "num_labels", "height", "width"],
+        style_codes: TensorType["batch_size", "num_labels", "style_dim"] = None,
+        content_code: TensorType["batch_size", "content_dim"] = None,
+    ) -> TensorType["batch_size", "num_output_channels", "height", "height"]:
+
+        if self.use_vae:
+            mu, logvar = style_codes
+            std = torch.exp(0.5 * logvar)
+            eps = torch.randn_like(std)
+            x = eps.mul(std) + mu
+            x = self.fc(x)
+
+        else:
+            # We first downsample the segmentation map
+            x = F.interpolate(segmentation_map, size=(self.small_h, self.small_w))
+
+            # First convolution
+            x = self.fc(x)
+
+        # Then proceed to apply the different sean_block
+        for i in range(len(self.backbone)):
+            x = self.backbone[f"GroupDNet_block_{i}"](x, segmentation_map)
+
+        # Finally a last convolution
+        x = self.last_conv(x)
+        return x
+    def get_last_layer(self):
+        return self.last_conv[-2].weight
+
+class GroupDNetResUpscale(nn.Module):
     """
     This combines the upscaling and the SEANResBlock.
 
@@ -38,6 +229,7 @@ class SPADEResUpscale(nn.Module):
         output_dim: int,
         num_labels: int,
         kernel_size: int,
+        groups: int,
         apply_spectral_norm: bool = True,
     ):
         super().__init__()
@@ -50,11 +242,12 @@ class SPADEResUpscale(nn.Module):
         else:
             raise "Upscaling size not supported"
 
-        self.spade_block = SPADEResBlock(
+        self.groupdnet_block = GroupDNetResBlock(
             input_dim=input_dim,
             output_dim=output_dim,
             num_labels=num_labels,
             kernel_size=kernel_size,
+            groups=groups,
             apply_spectral_norm=apply_spectral_norm,
         )
 
@@ -68,12 +261,12 @@ class SPADEResUpscale(nn.Module):
         ],
         segmentation_map: TensorType["batch_size", "num_labels", "height", "width"],
     ) -> TensorType["batch_size", "output_dim", "output_heigth", "output_width",]:
-        x = self.spade_block(x, segmentation_map)
+        x = self.groupdnet_block(x, segmentation_map)
         x = self.up(x)
         return x
 
 
-class SPADEResBlock(nn.Module):
+class GroupDNetResBlock(nn.Module):
     """
     This is the base block for the SEAN system. We have to modulation-convolution
     and a modulation-convolution skip connection.
@@ -103,8 +296,11 @@ class SPADEResBlock(nn.Module):
         output_dim: int,
         num_labels: int,
         kernel_size: int,
+        groups: int,
         apply_spectral_norm: bool = True,
     ):
+        if groups <= 0:
+            groups = 1
 
         super().__init__()
 
@@ -116,15 +312,25 @@ class SPADEResBlock(nn.Module):
         self.activation = nn.LeakyReLU(2e-1)
         # Defining convolutions
         conv_0 = nn.Conv2d(
-            input_dim, middle_dim, kernel_size=kernel_size, padding=padding
+            input_dim,
+            middle_dim,
+            kernel_size=kernel_size,
+            padding=padding,
+            groups=groups,
         )
 
         conv_1 = nn.Conv2d(
-            middle_dim, output_dim, kernel_size=kernel_size, padding=padding
+            middle_dim,
+            output_dim,
+            kernel_size=kernel_size,
+            padding=padding,
+            groups=groups,
         )
 
         if self.resnet_connection:
-            self.conv_res = nn.Conv2d(input_dim, output_dim, kernel_size=1, bias=False)
+            self.conv_res = nn.Conv2d(
+                input_dim, output_dim, kernel_size=1, groups=groups, bias=False
+            )
         if apply_spectral_norm:
             conv_0 = spectral_norm(conv_0)
             conv_1 = spectral_norm(conv_1)
@@ -136,11 +342,12 @@ class SPADEResBlock(nn.Module):
         mod_params = {
             "num_labels": num_labels,
             "kernel_size": kernel_size,
+            "groups": groups,
         }
-        self.mod_0 = SPADEModulation(feature_map_dim=input_dim, **mod_params)
-        self.mod_1 = SPADEModulation(feature_map_dim=middle_dim, **mod_params)
+        self.mod_0 = GroupDNetModulation(feature_map_dim=input_dim, **mod_params)
+        self.mod_1 = GroupDNetModulation(feature_map_dim=middle_dim, **mod_params)
         if self.resnet_connection:
-            self.mod_res = SPADEModulation(feature_map_dim=input_dim, **mod_params)
+            self.mod_res = GroupDNetModulation(feature_map_dim=input_dim, **mod_params)
 
     def forward(
         self,
@@ -154,14 +361,13 @@ class SPADEResBlock(nn.Module):
             x_res = x
         dx = F.leaky_relu(self.mod_0(x, segmentation_map), 0.2)
         dx = self.conv_0(dx)
-
         dx = F.leaky_relu(self.mod_1(dx, segmentation_map), 0.2)
         dx = self.conv_1(dx)
 
         return x_res + dx
 
 
-class SPADEModulation(nn.Module):
+class GroupDNetModulation(nn.Module):
     """
     This module implements the method proposed in the SEAN paper to modulate the input according
     to the different styles and the segmentation mask.
@@ -187,12 +393,15 @@ class SPADEModulation(nn.Module):
         num_labels: int,
         feature_map_dim: int,
         kernel_size: int,
+        groups: int,
     ):
         super().__init__()
 
-        self.segmap_encoder = SegMapEncoder(num_labels, feature_map_dim, kernel_size)
+        self.segmap_encoder = SegMapGroupEncoder(
+            num_labels, feature_map_dim, kernel_size, groups
+        )
 
-        self.normalization_layer = nn.BatchNorm2d(feature_map_dim, affine=False)
+        self.normalization_layer = nn.InstanceNorm2d(feature_map_dim, affine=False)
 
     def forward(
         self,
@@ -213,7 +422,7 @@ class SPADEModulation(nn.Module):
         return out
 
 
-class SegMapEncoder(nn.Module):
+class SegMapGroupEncoder(nn.Module):
     """
     This block encode the segmentation map and output 2 parameters gamma and beta
     that contributes to the modulation of the generator last layer.
@@ -228,12 +437,18 @@ class SegMapEncoder(nn.Module):
             Kernel size of the convolutions that are used in this layer
     """
 
-    def __init__(self, num_labels: int, out_channels: int, kernel_size: int):
+    def __init__(
+        self,
+        num_labels: int,
+        out_channels: int,
+        kernel_size: int,
+        groups: int,
+    ):
         super().__init__()
 
         padding = kernel_size // 2
 
-        hidden_dim = 128
+        hidden_dim = num_labels * groups
 
         self.shared_mlp = nn.Sequential(
             nn.Conv2d(
@@ -241,6 +456,7 @@ class SegMapEncoder(nn.Module):
                 out_channels=hidden_dim,
                 kernel_size=kernel_size,
                 padding=padding,
+                groups=num_labels,
             ),
             nn.ReLU(),
         )
@@ -250,12 +466,14 @@ class SegMapEncoder(nn.Module):
             out_channels=out_channels,
             kernel_size=kernel_size,
             padding=padding,
+            groups=groups,
         )
         self.mu_mlp = nn.Conv2d(
             in_channels=hidden_dim,
             out_channels=out_channels,
             kernel_size=kernel_size,
             padding=padding,
+            groups=groups,
         )
 
     def forward(

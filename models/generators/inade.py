@@ -7,7 +7,197 @@ from torchtyping import TensorType
 from typing import Tuple
 from collections import OrderedDict
 
+from einops.einops import rearrange
+from models.utils_blocks.base import BaseNetwork
 
+class INADEGenerator(BaseNetwork):
+    """ "
+    This is the SEAN Generator that generates images provided a segmentation mask and style codes.
+
+    Parameters:
+    -----------
+        num_filters_last_layer: int,
+            Number of convolution filters at the last layer of the generator.
+        num_up_layers: int,
+            Number of SEAN upscaling layers
+        height: int,
+            Height of the generated image
+        width: int,
+            Width of the generated image
+        num_labels: int,
+            Number of segmentation labels
+        style_dim: int,
+            Dimension of the style vectors
+        kernel_size: int,
+            Size of the kernel for all convolutions in the kernel (padding = kernel_size//2)
+        num_output_channels: int.
+            Number of output channels (3 for RGB)
+        apply_spectral_norm: bool, default True
+            Whether to use or not the spectral norm in the block
+    """
+
+    def __init__(
+        self,
+        num_filters_last_layer: int,
+        num_up_layers: int,
+        height: int,
+        width: int,
+        num_labels: int,
+        noise_dim: int,
+        kernel_size: int,
+        num_output_channels: int,
+        apply_spectral_norm: bool = True,
+        use_vae: bool = True,
+    ):
+        super().__init__()
+
+        self.noise_dim = noise_dim
+        nf = num_filters_last_layer
+        self.nf = nf
+        if num_up_layers >= 4:
+            self.num_up_layers = num_up_layers
+        else:
+            raise ValueError("Number of layers must be bigger than 4")
+        aspect_ratio = width / height
+
+        if aspect_ratio < 1:
+            self.small_w = width // (2 ** (num_up_layers - 2))
+
+            self.small_h = round(self.small_w / aspect_ratio)
+
+            if self.small_w < 2:
+                raise ValueError(
+                    "You picked to many layers for the given image dimension."
+                )
+        else:
+            self.small_h = height // (2 ** (num_up_layers - 2))
+
+            self.small_w = round(self.small_h / aspect_ratio)
+
+            if self.small_h < 2:
+                raise "You picked to many layers for the given image dimension."
+
+        inade_params = {
+            "num_labels": num_labels,
+            "kernel_size": kernel_size,
+            "apply_spectral_norm": apply_spectral_norm,
+            "noise_dim": noise_dim,
+        }
+
+        padding = kernel_size // 2
+
+        self.fc = nn.Linear(256, 16 * nf * self.small_w * self.small_h)
+
+        dict_of_inade_blocks = OrderedDict()
+
+        # Down layers with constant number of filters
+        dict_of_inade_blocks.update(
+            {
+                f"INADE_block_0": INADEResUpscale(
+                    upscale_size=2,
+                    input_dim=16 * nf,
+                    output_dim=16 * nf,
+                    **inade_params,
+                ),
+            }
+        )
+        dict_of_inade_blocks.update(
+            {
+                f"INADE_block_1": INADEResUpscale(
+                    upscale_size=0,
+                    input_dim=16 * nf,
+                    output_dim=16 * nf,
+                    **inade_params,
+                ),
+            }
+        )
+        for i in range(2, num_up_layers - 4):
+            dict_of_inade_blocks.update(
+                {
+                    f"INADE_block_{i}": INADEResUpscale(
+                        upscale_size=2,
+                        input_dim=16 * nf,
+                        output_dim=16 * nf,
+                        **inade_params,
+                    ),
+                }
+            )
+        # We progressively diminish the feature map
+        for i in range(3):
+            dict_of_inade_blocks.update(
+                {
+                    f"INADE_block_{num_up_layers - 4+i}": INADEResUpscale(
+                        upscale_size=2,
+                        input_dim=2 ** (4 - i) * nf,
+                        output_dim=2 ** (3 - i) * nf,
+                        **inade_params,
+                    ),
+                }
+            )
+        # Finally we upscale to the given size
+        dict_of_inade_blocks.update(
+            {
+                f"INADE_block_{num_up_layers - 1}": INADEResUpscale(
+                    upscale_size=(height, width),
+                    input_dim=2 * nf,
+                    output_dim=nf,
+                    **inade_params,
+                ),
+            }
+        )
+
+        self.backbone = nn.ModuleDict(dict_of_inade_blocks)
+
+        # And the last convolution
+        self.last_conv = nn.Sequential(
+            nn.LeakyReLU(2e-1),
+            nn.Conv2d(
+                in_channels=nf,
+                out_channels=num_output_channels,
+                kernel_size=kernel_size,
+                padding=padding,
+            ),
+            nn.Tanh(),
+        )
+
+    def forward(
+        self,
+        segmentation_map: TensorType["batch_size", "num_labels", "height", "width"],
+        style_codes: TensorType["batch_size", "num_labels", "style_dim"] = None,
+        content_code: TensorType["batch_size", "content_dim"] = None,
+    ) -> TensorType["batch_size", "num_output_channels", "height", "height"]:
+
+        batch_size = segmentation_map.shape[0]
+
+        noise_start = torch.randn(
+            [batch_size, 256], dtype=torch.float32, device=segmentation_map.device
+        )
+        x = self.fc(noise_start)
+        x = rearrange(x, "b (c h w) -> b c h w", h=self.small_h, w=self.small_w)
+
+        noise = torch.randn(
+            [batch_size, segmentation_map.shape[1], 2, self.noise_dim],
+            device=x.device,
+        )
+        s_noise = torch.unsqueeze(
+            noise[:, :, 0, :].mul(torch.exp(0.5 * style_codes[1])) + style_codes[0], 2
+        )
+        b_noise = torch.unsqueeze(
+            noise[:, :, 1, :].mul(torch.exp(0.5 * style_codes[3])) + style_codes[2], 2
+        )
+        noise = torch.cat([s_noise, b_noise], 2)
+
+        # Then proceed to apply the different sean_block
+        for i in range(len(self.backbone)):
+            x = self.backbone[f"INADE_block_{i}"](x, segmentation_map, noise)
+
+        # Finally a last convolution
+        x = self.last_conv(x)
+        return x
+
+    def get_last_layer(self):
+        return self.last_conv[-2].weight
+        
 class INADEResUpscale(nn.Module):
     """
     This combines the upscaling and the SEANResBlock.

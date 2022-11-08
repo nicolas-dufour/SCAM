@@ -1,4 +1,4 @@
-_target_ : models.generator.SEANCLADEGenerator
+_target_ : models.generators.sean_clade.SEANCLADEGenerator
 num_filters_last_layer: 64
 num_up_layers: 7
 height: ${dataset.height}

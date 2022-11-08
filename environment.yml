@@ -1,12 +1,15 @@
 name: scam
 channels:
+  - pytorch
   - defaults
 dependencies:
   - numpy=1.21.2
   - pillow=9.0.1
   - python=3.9.12
+  - pytorch=1.12
   - pip=21.2.4
   - pip:
+    - torchvision==0.13
     - albumentations==1.1.0
     - einops==0.4.1
     - hydra-core==1.1.1

@@ -160,7 +160,7 @@ class FID(Metric):
         return compute_fid(mean_real, mean_generated[0], sigma_real, sigma_generated)
 
 
-def compute_fid_for_dataset(dataloader, save_path, device="cpu"):
+def compute_fid_features(dataloader, save_path, device="cpu"):
     feature_extractor = NoTrainInceptionV3(
         name="inception-v3-compat", features_list=[str(2048)]
     ).to(device)

@@ -1,4 +1,4 @@
-_target_ : models.generator.INADEGenerator
+_target_ : models.generators.inade.INADEGenerator
 num_filters_last_layer: 64
 num_up_layers: 7
 height: ${dataset.height}
@@ -8,3 +8,4 @@ noise_dim: 64
 kernel_size: 3
 num_output_channels: ${dataset.num_channels}
 apply_spectral_norm: True
+use_vae: True

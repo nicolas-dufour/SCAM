@@ -49,4 +49,4 @@ losses:
   lazy_r1_step: 16
   gan_loss_type: hinge
   gan_loss_on_swaps: False
-  use_adaptive_lambda: True
+  use_adaptive_lambda: False
